@@ -103,6 +103,19 @@ export {
   formatAssetCode,
 } from "./utils"
 
+// ── Runtime (Framework-neutral wallet session persistence) ────────────────
+export {
+  WALLET_SESSION_STORAGE_KEY,
+  readSession,
+  writeSession,
+  clearSession,
+} from "./runtime/walletSession"
+export type {
+  StorageAdapter,
+  PersistedSession,
+  SessionPersistenceOptions,
+} from "./runtime/walletSession"
+
 // ── Types ──────────────────────────────────────────────────────────────────
 export type {
   StellarNetwork,

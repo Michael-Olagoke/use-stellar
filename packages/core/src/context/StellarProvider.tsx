@@ -10,8 +10,11 @@ import type {
 import { NETWORK_CONFIGS } from "../types"
 import { QueryStore } from "../cache"
 import type { QueryConfig } from "../cache"
+import { WALLET_SESSION_STORAGE_KEY } from "../runtime/walletSession"
 
 export type { AutoConnectOptions, QueryConfig }
+// Re-export the storage key for backward compatibility
+export { WALLET_SESSION_STORAGE_KEY }
 
 /**
  * The default initial state for a wallet connection in the Stellar context.
@@ -36,9 +39,6 @@ const DEFAULT_WALLET: WalletState = {
   walletNetwork: null,
   walletNetworkPassphrase: null,
 }
-
-/** Storage key holding the persisted wallet session. */
-export const WALLET_SESSION_STORAGE_KEY = "use-stellar:wallet-session"
 
 /**
  * React Context object that holds the Stellar context value or null.

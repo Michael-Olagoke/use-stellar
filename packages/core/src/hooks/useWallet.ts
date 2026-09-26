@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef } from "react"
-import { useStellarContext, WALLET_SESSION_STORAGE_KEY } from "../context/StellarProvider"
+import { useStellarContext } from "../context/StellarProvider"
 import { isBrowser } from "../utils"
 import type { AutoConnectOptions, StellarNetwork, WalletState, WalletType } from "../types"
 import { createStellarError, toStellarError } from "../errors"
 import { getWalletAdapter, hasWalletAdapter } from "../wallets"
 import type { WalletAdapter, WalletChange } from "../wallets"
+import { readSession, writeSession, type StorageAdapter } from "../runtime/walletSession"
 
 export interface UseWalletReturn extends WalletState {
   connect: (wallet?: WalletType) => Promise<void>
@@ -19,13 +20,11 @@ export interface UseWalletReturn extends WalletState {
   restoredWallet: WalletType | null
 }
 
-/** The shape persisted to storage. Nothing here is secret. */
-interface PersistedSession {
-  wallet: string
-  address?: string
-}
-
-function getStorage(kind: AutoConnectOptions["storage"]): Storage | null {
+/**
+ * Creates a browser-based StorageAdapter wrapping localStorage or sessionStorage.
+ * Returns null if storage is unavailable (SSR, sandboxed iframe, private mode).
+ */
+function getBrowserStorageAdapter(kind: AutoConnectOptions["storage"]): StorageAdapter | null {
   if (!isBrowser()) return null
 
   try {
@@ -34,52 +33,6 @@ function getStorage(kind: AutoConnectOptions["storage"]): Storage | null {
     return kind === "session" ? window.sessionStorage : window.localStorage
   } catch {
     return null
-  }
-}
-
-/**
- * Reads the persisted session, discarding anything that is not a well-formed
- * record naming a wallet that is actually registered.
- *
- * A stored value is attacker-influenced input in an XSS scenario, so it is
- * validated before it ever reaches the registry.
- */
-function readSession(kind: AutoConnectOptions["storage"]): PersistedSession | null {
-  const storage = getStorage(kind)
-  if (!storage) return null
-
-  try {
-    const raw = storage.getItem(WALLET_SESSION_STORAGE_KEY)
-    if (!raw) return null
-
-    const parsed: unknown = JSON.parse(raw)
-    if (typeof parsed !== "object" || parsed === null) return null
-
-    const { wallet, address } = parsed as Record<string, unknown>
-    if (typeof wallet !== "string" || !hasWalletAdapter(wallet)) return null
-
-    return {
-      wallet,
-      address: typeof address === "string" ? address : undefined,
-    }
-  } catch {
-    return null
-  }
-}
-
-function writeSession(kind: AutoConnectOptions["storage"], session: PersistedSession | null): void {
-  const storage = getStorage(kind)
-  if (!storage) return
-
-  try {
-    if (session) {
-      storage.setItem(WALLET_SESSION_STORAGE_KEY, JSON.stringify(session))
-    } else {
-      storage.removeItem(WALLET_SESSION_STORAGE_KEY)
-    }
-  } catch {
-    // Quota exceeded, or storage disabled mid-session. Losing the ability to
-    // restore a session is never a reason to break the app.
   }
 }
 
@@ -172,10 +125,13 @@ export function useWallet(): UseWalletReturn {
         restoredWalletRef.current = null
 
         if (autoConnect.enabled) {
-          writeSession(autoConnect.storage, {
-            wallet: String(connection.wallet),
-            ...(autoConnect.persistAddress ? { address: connection.address } : {}),
-          })
+          const storageAdapter = getBrowserStorageAdapter(autoConnect.storage)
+          if (storageAdapter) {
+            writeSession(storageAdapter, { storage: autoConnect.storage, persistAddress: autoConnect.persistAddress }, {
+              wallet: String(connection.wallet),
+              ...(autoConnect.persistAddress ? { address: connection.address } : {}),
+            })
+          }
         }
       } catch (err) {
         safeSetWallet(prev => ({
@@ -199,7 +155,10 @@ export function useWallet(): UseWalletReturn {
     }
 
     restoredWalletRef.current = null
-    writeSession(autoConnect.storage, null)
+    const storageAdapter = getBrowserStorageAdapter(autoConnect.storage)
+    if (storageAdapter) {
+      writeSession(storageAdapter, { storage: autoConnect.storage, persistAddress: autoConnect.persistAddress }, null)
+    }
 
     safeSetWallet({
       connected: false,
@@ -212,7 +171,7 @@ export function useWallet(): UseWalletReturn {
       walletNetwork: null,
       walletNetworkPassphrase: null,
     })
-  }, [safeSetWallet, wallet.wallet, autoConnect.storage])
+  }, [safeSetWallet, wallet.wallet, autoConnect.storage, autoConnect.persistAddress])
 
   const refreshWalletNetwork = useCallback(async () => {
     if (!wallet.connected || !wallet.wallet) {
@@ -243,7 +202,12 @@ export function useWallet(): UseWalletReturn {
   useEffect(() => {
     if (!autoConnect.enabled || !isBrowser()) return
 
-    const session = readSession(autoConnect.storage)
+    const storageAdapter = getBrowserStorageAdapter(autoConnect.storage)
+    const session = readSession(
+      storageAdapter,
+      { storage: autoConnect.storage, persistAddress: autoConnect.persistAddress },
+      hasWalletAdapter
+    )
     if (!session) return
 
     let cancelled = false
@@ -280,7 +244,10 @@ export function useWallet(): UseWalletReturn {
       } catch {
         // A wallet that cannot be restored is not an error the user caused —
         // they simply start from a disconnected UI.
-        writeSession(autoConnect.storage, null)
+        const storageAdapterClear = getBrowserStorageAdapter(autoConnect.storage)
+        if (storageAdapterClear) {
+          writeSession(storageAdapterClear, { storage: autoConnect.storage, persistAddress: autoConnect.persistAddress }, null)
+        }
       }
     })()
 
@@ -291,7 +258,7 @@ export function useWallet(): UseWalletReturn {
     // re-running it whenever the callback identity changes would reconnect on
     // every network prop change.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- session restore ignores callback identity changes that would reconnect on network updates.
-  }, [autoConnect.enabled, autoConnect.storage])
+  }, [autoConnect.enabled, autoConnect.storage, autoConnect.persistAddress])
 
   // ── Wallet change events ─────────────────────────────────────────────────
   // Subscribes through the adapter contract. Adapters that cannot report
