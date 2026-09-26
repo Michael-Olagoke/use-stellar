@@ -3,6 +3,15 @@
 export { StellarProvider, WALLET_SESSION_STORAGE_KEY } from "./context/StellarProvider"
 export type { StellarProviderProps, QueryConfig } from "./context/StellarProvider"
 
+// ── Framework-neutral Runtime ──────────────────────────────────────────────
+// Public non-React boundary: framework adapters (Vue, Svelte, etc.) use these
+export { StellarRuntime, createStellarRuntime } from "./runtime"
+export type {
+  StellarRuntimeSnapshot,
+  StellarRuntimeListener,
+  CreateStellarRuntimeOptions,
+} from "./runtime"
+
 // ── Hooks ──────────────────────────────────────────────────────────────────
 export * from "./hooks/useSorobanWrite"
 export type { SorobanInvokeOptions, UseSorobanWriteReturn } from "./types"

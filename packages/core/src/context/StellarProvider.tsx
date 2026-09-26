@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useRef, useState, type ReactNode } from "react"
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import type {
   AutoConnectOptions,
   CustomNetworkConfig,
@@ -10,6 +10,8 @@ import type {
 import { NETWORK_CONFIGS } from "../types"
 import { QueryStore } from "../cache"
 import type { QueryConfig } from "../cache"
+import { createStellarRuntime } from "../runtime"
+import type { StellarRuntime, StellarRuntimeSnapshot } from "../runtime"
 
 export type { AutoConnectOptions, QueryConfig }
 
@@ -45,86 +47,6 @@ export const WALLET_SESSION_STORAGE_KEY = "use-stellar:wallet-session"
  * Primarily consumed via the `useStellarContext` helper.
  */
 const StellarContext = createContext<StellarContextValue | null>(null)
-
-// ── Validation ─────────────────────────────────────────────────────────────
-/** Returns the built-in config for a network, or `undefined` for `"custom"`. */
-function getBuiltInConfig(network: StellarNetwork): NetworkConfig | undefined {
-  return network === "custom" ? undefined : NETWORK_CONFIGS[network]
-}
-
-/**
- * Validates a custom network config override and returns the merged
- * `NetworkConfig`, including the resolved `networkPassphrase`. Throws a
- * descriptive error if anything required is missing or obviously malformed, so
- * developers catch misconfiguration at startup.
- *
- * This is the single place a passphrase is resolved. Every hook that builds a
- * transaction reads `networkConfig.networkPassphrase` rather than deciding for
- * itself, because a passphrase chosen per-call-site is a passphrase that can
- * disagree with itself — and a signature bound to the wrong network is
- * rejected in a way nothing in the library would suspect.
- */
-function resolveNetworkConfig(
-  network: StellarNetwork,
-  override: CustomNetworkConfig | undefined
-): NetworkConfig {
-  const builtIn = getBuiltInConfig(network)
-
-  if (!override) {
-    if (!builtIn) {
-      throw new Error(
-        'use-stellar: network="custom" requires a networkConfig with ' +
-          "`horizonUrl`, `sorobanUrl`, and `networkPassphrase`. " +
-          'Example: { horizonUrl: "http://localhost:8000", ' +
-          'sorobanUrl: "http://localhost:8000/soroban/rpc", ' +
-          'networkPassphrase: "Standalone Network ; February 2017" }'
-      )
-    }
-
-    // No override — use the built-in SDF defaults.
-    return builtIn
-  }
-
-  const { horizonUrl, sorobanUrl, networkPassphrase } = override
-
-  if (!horizonUrl || typeof horizonUrl !== "string" || horizonUrl.trim() === "") {
-    throw new Error(
-      "use-stellar: Invalid networkConfig — `horizonUrl` is required when " +
-        "providing a custom networkConfig. " +
-        'Example: { horizonUrl: "https://horizon.my-node.com", sorobanUrl: "..." }'
-    )
-  }
-
-  if (!sorobanUrl || typeof sorobanUrl !== "string" || sorobanUrl.trim() === "") {
-    throw new Error(
-      "use-stellar: Invalid networkConfig — `sorobanUrl` is required when " +
-        "providing a custom networkConfig. " +
-        'Example: { horizonUrl: "...", sorobanUrl: "https://rpc.my-node.com" }'
-    )
-  }
-
-  const hasPassphrase = typeof networkPassphrase === "string" && networkPassphrase.trim() !== ""
-
-  // Never default a passphrase for a network we ship no defaults for. Signing
-  // with a silently-chosen passphrase must not be reachable.
-  if (!hasPassphrase && !builtIn) {
-    throw new Error(
-      'use-stellar: Invalid networkConfig — `networkPassphrase` is required when network="custom". ' +
-        "There is no default passphrase for a network this library ships no configuration for, and " +
-        "guessing one would sign transactions that the target network rejects. " +
-        'Example: { networkPassphrase: "Standalone Network ; February 2017" }'
-    )
-  }
-
-  return {
-    network,
-    horizonUrl: horizonUrl.trim(),
-    sorobanUrl: sorobanUrl.trim(),
-    networkPassphrase: hasPassphrase
-      ? (networkPassphrase as string).trim()
-      : (builtIn as NetworkConfig).networkPassphrase,
-  }
-}
 
 // ── Provider ───────────────────────────────────────────────────────────────
 /**
@@ -228,19 +150,24 @@ function resolveAutoConnect(
  * StellarProvider wraps your React application to manage the active Stellar network configuration
  * and wallet connection states. It serves as the single source of truth for the SDK/wallet contexts.
  *
+ * ### Architecture:
+ * Under the hood, StellarProvider owns a stable {@link StellarRuntime} instance that manages
+ * framework-neutral state (network config, wallet, QueryStore). React hooks into this runtime
+ * via useEffect to sync its state to React's useState, ensuring all downstream hooks access
+ * the same snapshot and respond to updates in lockstep.
+ *
  * ### Lifecycle and Resource Management:
- * - **On Mount**: Initializes the internal `wallet` state with `DEFAULT_WALLET`. It does not make
- *   any network requests, open WebSocket connections, setup timers, or add window event listeners
- *   upon initial mounting. This makes the provider lightweight, fast to mount, and fully server-side
- *   rendering (SSR) safe.
+ * - **On Mount**: Initializes the internal `runtime` instance once per provider mount.
+ *   It does not make any network requests, open WebSocket connections, setup timers, or add
+ *   window event listeners upon initial mounting. This makes the provider lightweight, fast
+ *   to mount, and fully server-side rendering (SSR) safe.
  * - **At Runtime**:
  *   - The `network` prop can change dynamically if updated by the parent component. When the
- *     `network` prop changes, the context updates its network config instantly, notifying all downstream hooks.
- *   - The `wallet` state is dynamically managed via the returned `setWallet` function when a wallet
- *     adapter (e.g. Freighter, LOBSTR) connects, disconnects, or updates network profiles.
- * - **On Unmount**: Because no background resources (like network polling, socket connections, or event listeners)
- *   are spawned during initialization or maintained directly by this provider, no cleanup or
- *   unsubscription operations are performed during the unmount phase.
+ *     `network` prop changes, the runtime updates its network config instantly, notifying all
+ *     downstream subscribers and re-rendering React consumers.
+ *   - The `wallet` state is dynamically managed via the returned `setWallet` function when a
+ *     wallet adapter (e.g. Freighter, LOBSTR) connects, disconnects, or updates network profiles.
+ * - **On Unmount**: No cleanup is needed — all subscribers are unregistered and resources are freed.
  *
  * @example
  * ```tsx
@@ -258,39 +185,38 @@ export function StellarProvider({
   autoConnect,
   children,
 }: StellarProviderProps) {
-  // Resolve once at render time — throws immediately on bad config so
-  // developers see the error in the console/overlay rather than silently
-  // getting undefined URLs at request time.
-  const resolvedNetworkConfig = useMemo(
-    () => resolveNetworkConfig(network, networkConfigOverride),
-    // Depend on the fields resolveNetworkConfig actually reads, not on the
-    // object: callers routinely pass an inline `networkConfig={{...}}`, and
-    // depending on its identity would re-resolve — and re-render every
-    // consumer — on every render. `networkPassphrase` belongs here too; it is
-    // read alongside the two URLs, so omitting it left a custom passphrase
-    // change stale.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [
+  // Create the runtime once per provider mount. Using useRef ensures it is never recreated
+  // even if the component re-renders, which would lose all cached data.
+  const runtimeRef = useRef<StellarRuntime | null>(null)
+  if (!runtimeRef.current) {
+    runtimeRef.current = createStellarRuntime({
       network,
-      networkConfigOverride?.horizonUrl,
-      networkConfigOverride?.sorobanUrl,
-      networkConfigOverride?.networkPassphrase,
-    ]
-  )
+      networkConfig: networkConfigOverride,
+      queryConfig,
+    })
+  }
 
-  const [wallet, setWallet] = useState<WalletState>(DEFAULT_WALLET)
+  const runtime = runtimeRef.current
 
-  // The QueryStore is created once per provider mount (not per render).
-  // We use useRef so the store instance is stable — recreating it on every
-  // render would lose all cached data, defeating the purpose entirely.
-  //
-  // When queryConfig changes we do NOT recreate the store: staleTime and
-  // gcTime are read from the store's config at access time, so a prop update
-  // takes effect on the next fetch/eviction without invalidating the cache.
-  const queryConfigRef = useRef(queryConfig)
-  queryConfigRef.current = queryConfig
+  // Sync the provider's props to the runtime.
+  // When network or networkConfig props change, update the runtime accordingly.
+  useEffect(() => {
+    runtime.setNetwork(network, networkConfigOverride)
+  }, [runtime, network, networkConfigOverride])
 
-  const queryStore = useMemo(() => new QueryStore(queryConfig), []) // eslint-disable-line
+  // React state that mirrors the runtime snapshot.
+  // Hooks subscribe to the runtime and update this state whenever the runtime changes,
+  // triggering React re-renders.
+  const [snapshot, setSnapshot] = useState<StellarRuntimeSnapshot>(() => runtime.getSnapshot())
+
+  // Subscribe to runtime changes and sync to React state.
+  useEffect(() => {
+    const unsubscribe = runtime.subscribe((newSnapshot) => {
+      setSnapshot(newSnapshot)
+    })
+
+    return unsubscribe
+  }, [runtime])
 
   // Derived from the same fields `resolveAutoConnect` reads rather than from
   // the prop object, because callers routinely pass `autoConnect={{ ... }}`
@@ -307,19 +233,22 @@ export function StellarProvider({
     [autoConnectEnabled, autoConnectPersistAddress, autoConnectStorage]
   )
 
-  // Memoized, not rebuilt per render. A fresh object literal here is a new
-  // context value on every provider render, which re-renders every consumer in
-  // the tree — including ones whose own inputs did not change.
+  // Memoized context value. A fresh object literal here is a new context value on every
+  // provider render, which re-renders every consumer in the tree — including ones whose
+  // own inputs did not change.
   const value: StellarContextValue = useMemo(
     () => ({
-      network,
-      networkConfig: resolvedNetworkConfig,
-      wallet,
-      setWallet,
+      network: snapshot.network,
+      networkConfig: snapshot.networkConfig,
+      wallet: snapshot.wallet,
+      setWallet: (walletOrUpdater) => {
+        const newWallet = typeof walletOrUpdater === "function" ? walletOrUpdater(snapshot.wallet) : walletOrUpdater
+        runtime.setWallet(newWallet)
+      },
       autoConnect: resolvedAutoConnect,
-      queryStore,
+      queryStore: snapshot.queryStore,
     }),
-    [network, resolvedNetworkConfig, wallet, resolvedAutoConnect, queryStore]
+    [snapshot, runtime, resolvedAutoConnect]
   )
 
   return <StellarContext.Provider value={value}>{children}</StellarContext.Provider>
