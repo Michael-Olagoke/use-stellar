@@ -1,0 +1,71 @@
+{
+  "name": "@use-stellar/vue",
+  "version": "0.0.1",
+  "description": "Vue 3 adapter for use-stellar - Stellar network composables",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/israelolrunfemi/use-stellar.git",
+    "directory": "packages/vue"
+  },
+  "homepage": "https://github.com/israelolrunfemi/use-stellar#readme",
+  "bugs": {
+    "url": "https://github.com/israelolrunfemi/use-stellar/issues"
+  },
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsup --watch"
+  },
+  "peerDependencies": {
+    "vue": "^3.0.0"
+  },
+  "dependencies": {
+    "use-stellar": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0",
+    "tsup": "^8.0.0",
+    "vue": "^3.4.0"
+  },
+  "keywords": [
+    "stellar",
+    "soroban",
+    "vue",
+    "vue3",
+    "composables",
+    "blockchain",
+    "web3",
+    "crypto",
+    "xlm",
+    "usdc"
+  ],
+  "license": "Apache-2.0"
+}
