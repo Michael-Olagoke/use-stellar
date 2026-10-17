@@ -32,8 +32,10 @@ export {
 
 // ── Wallet Adapter ─────────────────────────────────────────────────────────
 export { freighterAdapter } from "./wallets/freighterAdapter"
+export { lobstrAdapter } from "./wallets/lobstrAdapter"
 export {
   FREIGHTER_WALLET_TYPE,
+  LOBSTR_WALLET_TYPE,
   NETWORK_PASSPHRASES,
   resolveNetworkFromPassphrase,
 } from "./wallets/constants"

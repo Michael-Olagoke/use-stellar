@@ -80,6 +80,7 @@
     "react-dom": ">=18.0.0",
     "@albedo-link/intent": "^0.13.0",
     "@stellar/freighter-api": "^6.0.0",
+    "@lobstrco/signer-extension-api": "^2.0.0",
     "@walletconnect/sign-client": "^2.0.0"
   },
   "peerDependenciesMeta": {
@@ -90,6 +91,9 @@
       "optional": true
     },
     "@stellar/freighter-api": {
+      "optional": true
+    },
+    "@lobstrco/signer-extension-api": {
       "optional": true
     },
     "@walletconnect/sign-client": {
@@ -103,6 +107,7 @@
     "@arethetypeswrong/cli": "^0.18.5",
     "@albedo-link/intent": "^0.13.0",
     "@stellar/freighter-api": "6.0.1",
+    "@lobstrco/signer-extension-api": "^2.0.0",
     "@size-limit/esbuild": "12.1.0",
     "@size-limit/esbuild-why": "12.1.0",
     "@size-limit/preset-small-lib": "^12.1.0",

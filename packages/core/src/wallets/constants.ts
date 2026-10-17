@@ -2,6 +2,7 @@ import type { WalletNetworkId } from "../types"
 import { NETWORK_PASSPHRASES } from "../types"
 
 export const FREIGHTER_WALLET_TYPE = "freighter" as const
+export const LOBSTR_WALLET_TYPE = "lobstr" as const
 
 export { NETWORK_PASSPHRASES }
 

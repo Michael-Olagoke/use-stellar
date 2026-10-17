@@ -15,7 +15,8 @@
     "skipLibCheck": true,
     "baseUrl": ".",
     "paths": {
-      "@stellar/stellar-sdk": ["../core/src/__mocks__/@stellar/stellar-sdk.ts"]
+      "@stellar/stellar-sdk": ["../core/src/__mocks__/@stellar/stellar-sdk.ts"],
+      "@lobstrco/signer-extension-api": ["../core/src/@lobstrco-signer-extension-api.d.ts"]
     }
   },
   "include": ["src"],

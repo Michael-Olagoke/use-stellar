@@ -5,6 +5,7 @@ module.exports = {
   setupFilesAfterEnv: ["@testing-library/jest-dom", "<rootDir>/jest.setup.ts"],
   moduleNameMapper: {
     "^@stellar/stellar-sdk$": "<rootDir>/src/__mocks__/@stellar/stellar-sdk.ts",
+    "^@lobstrco/signer-extension-api$": "<rootDir>/src/wallets/__mocks__/@lobstrco/signer-extension-api.ts",
   },
   collectCoverageFrom: [
     "src/**/*.{ts,tsx}",
